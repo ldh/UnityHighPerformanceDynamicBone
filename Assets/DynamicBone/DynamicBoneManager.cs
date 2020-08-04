@@ -164,18 +164,21 @@ public class DynamicBoneManager : MonoBehaviour
                 }
             }
             
-            //碰撞检测, 获取根骨骼所对应的所有碰撞器并进行计算
+            //与指定的非全局碰撞器进行计算
             NativeMultiHashMap<int, int>.Enumerator enumerator = BoneColliderMatchMap.GetValuesForKey(headIndex);
             while (enumerator.MoveNext())
             {
+                if(ColliderArray[enumerator.Current].IsGlobal) continue;
                 particleInfo.IsCollide =
                     DynamicBoneUtility.HandleCollision(ColliderArray[enumerator.Current],
                         ref particleInfo.TempWorldPosition,
                         in particleInfo.Radius);
             }
             
+            //与所有的全局碰撞器进行计算
             for (int i = 0; i < ColliderArray.Length; i++)
             {
+                if(!ColliderArray[i].IsGlobal) continue;
                 particleInfo.IsCollide =
                     DynamicBoneUtility.HandleCollision(ColliderArray[i],
                         ref particleInfo.TempWorldPosition,

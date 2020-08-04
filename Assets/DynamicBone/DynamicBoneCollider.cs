@@ -22,6 +22,7 @@ public enum Bound
 public struct ColliderInfo
 {
     public int Index;
+    public bool IsGlobal;
     public Bound Bound;
     public float Height;
     public float Radius;
@@ -33,9 +34,11 @@ public struct ColliderInfo
 
 }
 
-[AddComponentMenu("Dynamic Bone/Dynamic Bone Collider ForJob")]
 public class DynamicBoneCollider : MonoBehaviour
 {
+    [Tooltip("Whether this collider is available for all bones or not")] [SerializeField]
+    public bool IsGlobal = false;
+    
     [Tooltip("The axis of the capsule's height.")] [SerializeField]
     public Direction Direction = Direction.Y;
 
@@ -78,6 +81,7 @@ public class DynamicBoneCollider : MonoBehaviour
         ColliderInfo colliderInfo = new ColliderInfo
         {
             Index = curColliderIndex,
+            IsGlobal = IsGlobal,
             Center = Center,
             Radius = Radius,
             Height = Height,
