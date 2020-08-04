@@ -54,44 +54,43 @@ public class DynamicBoneCollider : MonoBehaviour
     [Tooltip("The height of the capsule.")] [SerializeField]
     public float Height = 0;
 
-    public ColliderInfo ColliderInfo { get; private set; }
+    public ColliderInfo ColliderInfo;
 
-    private static int index;
-
-    private int curColliderIndex;
+    private bool hasInitialized;
 
     private void OnValidate()
     {
-        Radius = math.max(Radius, 0);
-        Height = math.max(Height, 0);
+        if (!hasInitialized) return;
+        if (Application.isEditor && Application.isPlaying)
+        {
+            ColliderInfo.Radius = math.max(Radius, 0);
+            ColliderInfo.Height = math.max(Height, 0);
+            ColliderInfo.Bound = Bound;
+            ColliderInfo.Center = Center;
+            ColliderInfo.Direction = Direction;
+            DynamicBoneManager.Instance.RefreshColliderInfo(ColliderInfo);
+        }
     }
-    
+
     private void Awake()
     {
-        curColliderIndex = index++;
-    }
-
-    private void Start()
-    {
-        DynamicBoneManager.Instance.AddCollider(this);
-    }
-
-    private void Update()
-    {
-        ColliderInfo colliderInfo = new ColliderInfo
+        ColliderInfo = new ColliderInfo
         {
-            Index = curColliderIndex,
             IsGlobal = IsGlobal,
             Center = Center,
             Radius = Radius,
             Height = Height,
             Direction = Direction,
             Bound = Bound,
-            Scale = transform.lossyScale.x, 
-            Position = transform.position,
-            Rotation = transform.rotation
+            Scale = transform.lossyScale.x,
         };
-        DynamicBoneManager.Instance.RefreshColliderInfo(in colliderInfo);
+        DynamicBoneManager.Instance.AddCollider(this);
+        hasInitialized = true;
+    }
+
+    private void Start()
+    {
+
     }
 
     private void OnDrawGizmosSelected()

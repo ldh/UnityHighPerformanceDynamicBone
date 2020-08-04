@@ -18,9 +18,23 @@ public class DynamicBoneManager : MonoBehaviour
             return instance;
         }
     }
+    
+    [BurstCompile]
+    private struct ColliderSetupJob: IJobParallelForTransform
+    {
+        public NativeArray<ColliderInfo> ColliderArray;
+        public void Execute(int index, TransformAccess transform)
+        {
+            ColliderInfo colliderInfo = ColliderArray[index];
+            colliderInfo.Position = transform.position;
+            colliderInfo.Rotation = transform.rotation;
+            // colliderInfo.Scale = transform.localScale.x;
+            ColliderArray[index] = colliderInfo;
+        }
+    }
 
     [BurstCompile]
-    private struct RootSetupJob : IJobParallelForTransform
+    private struct BoneSetupJob : IJobParallelForTransform
     {
         public NativeArray<HeadInfo> HeadArray;
         public bool IsFirstUpdate;
@@ -163,7 +177,6 @@ public class DynamicBoneManager : MonoBehaviour
                         particleInfo.TempWorldPosition += d * ((len - maxLen) / len);
                 }
             }
-            
             //与指定的非全局碰撞器进行计算
             NativeMultiHashMap<int, int>.Enumerator enumerator = BoneColliderMatchMap.GetValuesForKey(headIndex);
             while (enumerator.MoveNext())
@@ -174,10 +187,10 @@ public class DynamicBoneManager : MonoBehaviour
                         ref particleInfo.TempWorldPosition,
                         in particleInfo.Radius);
             }
-            
             //与所有的全局碰撞器进行计算
             for (int i = 0; i < ColliderArray.Length; i++)
             {
+
                 if(!ColliderArray[i].IsGlobal) continue;
                 particleInfo.IsCollide =
                     DynamicBoneUtility.HandleCollision(ColliderArray[i],
@@ -214,18 +227,21 @@ public class DynamicBoneManager : MonoBehaviour
         }
     }
 
-    private List<DynamicBone> dynamicBoneList;
+    private List<DynamicBone> boneList;
+    private List<DynamicBoneCollider> colliderList;
     private NativeList<HeadInfo> headInfoList;
     private NativeList<ParticleInfo> particleInfoList;
     private NativeList<ColliderInfo> colliderInfoList;
     private NativeMultiHashMap<int, int> boneColliderMatchMap;
+    private TransformAccessArray colliderTransformAccessArray;
     private TransformAccessArray headTransformAccessArray;
     private TransformAccessArray particleTransformAccessArray;
     private bool isFirstUpdate;
 
     private void Awake()
     {
-        dynamicBoneList = new List<DynamicBone>();
+        boneList = new List<DynamicBone>();
+        colliderList = new List<DynamicBoneCollider>();
 
         headInfoList = new NativeList<HeadInfo>(200, Allocator.Persistent);
         headTransformAccessArray = new TransformAccessArray(200, 64);
@@ -233,7 +249,10 @@ public class DynamicBoneManager : MonoBehaviour
         particleInfoList = new NativeList<ParticleInfo>(Allocator.Persistent);
         particleTransformAccessArray = new TransformAccessArray(200 * DynamicBone.MaxParticleLimit, 64);
 
-        colliderInfoList = new NativeList<ColliderInfo>(10, Allocator.Persistent);
+        colliderInfoList = new NativeList<ColliderInfo>(Allocator.Persistent);
+        colliderTransformAccessArray = new TransformAccessArray(200, 64);
+        
+        
         boneColliderMatchMap = new NativeMultiHashMap<int, int>(200, Allocator.Persistent);
         isFirstUpdate = true;
     }
@@ -246,14 +265,27 @@ public class DynamicBoneManager : MonoBehaviour
 
         int dataArrayLength = runningDynamicBoneCount * DynamicBone.MaxParticleLimit;
 
-        JobHandle dependency;
 
-        dependency = new RootSetupJob
+
+        JobHandle colliderSetup = new ColliderSetupJob()
+        {
+            ColliderArray = colliderInfoList
+        }.Schedule(colliderTransformAccessArray);
+        
+        JobHandle boneSetup = new BoneSetupJob
         {
             HeadArray = headInfoList,
             IsFirstUpdate = isFirstUpdate
         }.Schedule(headTransformAccessArray);
-
+        
+        JobHandle dependency = JobHandle.CombineDependencies(colliderSetup, boneSetup);
+        
+        dependency =new BoneSetupJob
+        {
+            HeadArray = headInfoList,
+            IsFirstUpdate = isFirstUpdate
+        }.Schedule(headTransformAccessArray,dependency);
+        
         dependency = new UpdateParticles1Job
         {
             HeadArray = headInfoList,
@@ -276,12 +308,16 @@ public class DynamicBoneManager : MonoBehaviour
         dependency.Complete();
     }
 
+    /// <summary>
+    /// 将目标骨骼添加到结构中
+    /// </summary>
+    /// <param name="target"></param>
     public void AddBone(DynamicBone target)
     {
-        int index = dynamicBoneList.IndexOf(target);
-        if (index != -1) return; //判断该bone是否已经被添加过了
+        int index = boneList.IndexOf(target);
+        if (index != -1) return; // //防止重复添加
 
-        dynamicBoneList.Add(target);
+        boneList.Add(target);
 
         target.HeadInfo.DataOffsetInGlobalArray = particleInfoList.Length;
 
@@ -303,12 +339,17 @@ public class DynamicBoneManager : MonoBehaviour
         }
     }
 
+    
+    /// <summary>
+    /// 当目标骨骼需要移除的时候使用，目前还不完善，先不要使用
+    /// </summary>
+    /// <param name="target">要移除的目标骨骼</param>
     public void RemoveBone(DynamicBone target)
     {
-        int index = dynamicBoneList.IndexOf(target);
-        if (index == -1) return; //判断该bone是否存在于当前集合中
+        int index = boneList.IndexOf(target);
+        if (index == -1) return;
 
-        dynamicBoneList.RemoveAt(index);
+        boneList.RemoveAt(index);
         int curHeadIndex = target.HeadInfo.Index;
 
         //移除Bone的相关Collider的关系
@@ -330,7 +371,7 @@ public class DynamicBoneManager : MonoBehaviour
         else
         {
             //将最末列的HeadInfo 索引设置为当前将要移除的HeadInfo 索引
-            DynamicBone lastTarget = dynamicBoneList[dynamicBoneList.Count - 1];
+            DynamicBone lastTarget = boneList[boneList.Count - 1];
             HeadInfo lastHeadInfo = lastTarget.ResetHeadIndexAndDataOffset(curHeadIndex);
             headInfoList.RemoveAtSwapBack(curHeadIndex);
             headInfoList[curHeadIndex] = lastHeadInfo;
@@ -348,12 +389,20 @@ public class DynamicBoneManager : MonoBehaviour
         if (isFirstUpdate) isFirstUpdate = false;
     }
 
-
+    /// <summary>
+    /// 当骨骼头节点除了transform以外的其他信息被修改时，更新骨骼信息
+    /// </summary>
+    /// <param name="headInfo"></param>
     public void RefreshHeadInfo(in HeadInfo headInfo)
     {
         headInfoList[headInfo.Index] = headInfo;
     }
 
+    /// <summary>
+    /// 当骨骼子节点除了transform以外的其他信息被修改时，更新骨骼信息
+    /// </summary>
+    /// <param name="particleInfoArray"></param>
+    /// <param name="headOffsetInGlobalArray"></param>
     public void RefreshParticleInfo(in NativeArray<ParticleInfo> particleInfoArray, in int headOffsetInGlobalArray)
     {
         for (int i = headOffsetInGlobalArray; i < particleInfoArray.Length + headOffsetInGlobalArray; i++)
@@ -362,11 +411,39 @@ public class DynamicBoneManager : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// 将目标骨骼添加到结构中
+    /// </summary>
+    /// <param name="target"></param>
     public void AddCollider(DynamicBoneCollider target)
     {
+        int index = colliderList.IndexOf(target);
+
+        if (index != -1) return; //防止重复添加
+
+        colliderList.Add(target);
+        
+        int colliderIndex = colliderInfoList.Length;
+        target.ColliderInfo.Index = colliderIndex;
+        
         colliderInfoList.Add(target.ColliderInfo);
+        colliderTransformAccessArray.Add(target.transform);
     }
 
+    /// <summary>
+    /// 当目标碰撞器需要移除的时候使用，目前还不完善，先不要使用
+    /// </summary>
+    /// <param name="target">要移除的目标碰撞器</param>
+    public void RemoveCollider(DynamicBoneCollider target)
+    {
+        int index = colliderList.IndexOf(target);
+        if (index == -1) return; //防止重复移除
+    }
+
+    /// <summary>
+    /// 当碰撞器除了transform以外的其他信息被修改时，更新碰撞器信息
+    /// </summary>
+    /// <param name="colliderInfo"></param>
     public void RefreshColliderInfo(in ColliderInfo colliderInfo)
     {
         colliderInfoList[colliderInfo.Index] = colliderInfo;
@@ -378,8 +455,9 @@ public class DynamicBoneManager : MonoBehaviour
         if (particleTransformAccessArray.isCreated) particleTransformAccessArray.Dispose();
         if (particleInfoList.IsCreated) particleInfoList.Dispose();
         if (headInfoList.IsCreated) headInfoList.Dispose();
-        if (colliderInfoList.IsCreated) colliderInfoList.Dispose();
         if (headTransformAccessArray.isCreated) headTransformAccessArray.Dispose();
+        if (colliderInfoList.IsCreated) colliderInfoList.Dispose();
+        if (colliderTransformAccessArray.isCreated) colliderTransformAccessArray.Dispose();
         if (boneColliderMatchMap.IsCreated) boneColliderMatchMap.Dispose();
     }
 }

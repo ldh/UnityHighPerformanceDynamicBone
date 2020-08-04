@@ -57,12 +57,6 @@ public class DynamicBone : MonoBehaviour
     /// 该值为所有动态骨骼链中最长的那一根所包含的节点数量
     /// </summary>
     public const int MaxParticleLimit = 22;
-
-    /// <summary>
-    /// 如果你对层级结构有需求则不要拆分，但是最终赋值Transform的时候会无法并行处理
-    /// </summary>
-    [Tooltip("是否将所有子物体拆分至最上层")]
-    public bool Separate = false;
     
     [Tooltip("运动的根骨骼")]
     public Transform Root = null;
@@ -148,7 +142,7 @@ public class DynamicBone : MonoBehaviour
         }
     }
 
-    private void Start()
+    private void Awake()
     {
         if (!Root)
         {
@@ -160,6 +154,7 @@ public class DynamicBone : MonoBehaviour
         particleCount = 0;
         SetupParticles();
         DynamicBoneManager.Instance.AddBone(this);
+        hasInitialized = true;
     }
 
     public HeadInfo ResetHeadIndexAndDataOffset(int headIndex)
@@ -201,19 +196,7 @@ public class DynamicBone : MonoBehaviour
 
         UpdateParameters();
 
-        if (Separate)
-        {
-            for (int i = 0; i < particleCount; i++)
-            {
-                ParticleTransformArray[i].parent = null;
-            }
-        }
-
-        
-
         HeadInfo.ParticleCount = particleCount;
-
-        hasInitialized = true;
     }
 
     private void AppendParticles(Transform b, int parentIndex, float boneLength, ref HeadInfo head)
