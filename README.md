@@ -1,13 +1,18 @@
 # UnityHighPerformanceDynamicBone
-参照DynamicBone插件的思路，使用JobSystem和BurstCompiler对其进行了优化，在使用方法上与该插件非常相似，但是拥有超高的性能！
+目前使用的Unity和Package版本：Unity-2019.4， Jobs-0.2.10， Burst-1.3.3
 
-Unity为我们提供的JobSystem和BurstCompiler已经很成熟了，完全可以用在项目之中。同时这个项目也是一个用来学习DOTS其中两员大将的非常不错的选择。（什么？都2020年了你居然还不会在Unity使用多线程？）
+参照DynamicBone插件的思路，使用**JobSystem**和**BurstCompiler**对其进行了优化，在使用方法上与该插件非常相似，但是拥有超高的性能，快就完事了！
 
-同时本项目也使用新的数学库Unity.Mathmatics对以前的Vector和transform下的方法进行了修改。
+Unity为我们提供的**JobSystem**和**BurstCompiler**已经很成熟了，完全可以用在项目之中，同时本项目也使用新的数学库Unity.Mathmatics对以前的Vector和transform下的方法等进行了替换和修改。
+
+这个项目也是一个用来学习DOTS其中两员大将的非常不错的选择。（什么？都2020年了你居然还不会在Unity使用多线程？）我也是抱着学习和试验的心态来写的，所以难免会出现一些问题。
+
+相对于DOTS中的**ECS**， **Job**和**Burst**是可以单独拿出来用的，对你的项目计算密集的部分使用他们就行优化就可以获得巨大的性能提升，而且不必担心影响项目的结构，哪里想改改哪里。
 
 
 
 改善与新增：
+
 * 有了高性能加持，部分引用较多的Collider可以直接设置成Global供所有碰撞器使用，免去反复拖拽的工作。
 
 目前已知问题和缺陷：
@@ -21,4 +26,4 @@ Unity为我们提供的JobSystem和BurstCompiler已经很成熟了，完全可�
 
 更新：
 
-* 2020.8.4：将Collider也使用TransformAccess在Job中进行优化
+* 2020.8.4：将Collider的Transform信息获取也使用TransformAccess在Job中进行优化
