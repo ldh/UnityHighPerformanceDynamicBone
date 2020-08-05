@@ -5,6 +5,7 @@ namespace HighPerformanceDynamicBone
 {
     public static class DynamicBoneUtility
     {
+        #region Collider
         public static bool HandleCollision(in ColliderInfo collider, ref float3 particlePosition,
             in float particleRadius)
         {
@@ -203,6 +204,7 @@ namespace HighPerformanceDynamicBone
 
             return false;
         }
+        #endregion
     }
 }
 

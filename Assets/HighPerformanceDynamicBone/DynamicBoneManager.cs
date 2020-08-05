@@ -42,18 +42,14 @@ namespace HighPerformanceDynamicBone
         private struct BoneSetupJob : IJobParallelForTransform
         {
             public NativeArray<HeadInfo> HeadArray;
-            public bool IsFirstUpdate;
 
             public void Execute(int index, TransformAccess transform)
             {
                 HeadInfo curHeadInfo = HeadArray[index];
                 curHeadInfo.RootParentBoneWorldPos = transform.position;
                 curHeadInfo.RootParentBoneWorldRot = transform.rotation;
-
-                if (!IsFirstUpdate)
-                {
-                    curHeadInfo.ObjectMove = transform.position - (Vector3) curHeadInfo.ObjectPrevPosition;
-                }
+                
+                curHeadInfo.ObjectMove = transform.position - (Vector3) curHeadInfo.ObjectPrevPosition;
 
                 curHeadInfo.ObjectPrevPosition = transform.position;
                 float3 force = curHeadInfo.Gravity;
@@ -91,10 +87,10 @@ namespace HighPerformanceDynamicBone
                         int pIdx = curHeadInfo.DataOffsetInGlobalArray + j;
                         ParticleInfo p = ParticleArray[pIdx];
 
-                        var localPosition = p.LocalPosition * p.ParentScale;
-                        var localRotation = p.LocalRotation;
-                        var worldPosition = parentPosition + math.mul(parentRotation, localPosition);
-                        var worldRotation = math.mul(parentRotation, localRotation);
+                        float3 localPosition = p.LocalPosition * p.ParentScale;
+                        quaternion localRotation = p.LocalRotation;
+                        float3 worldPosition = parentPosition + math.mul(parentRotation, localPosition);
+                        quaternion worldRotation = math.mul(parentRotation, localRotation);
 
                         parentPosition = p.WorldPosition = worldPosition;
                         parentRotation = p.WorldRotation = worldRotation;
@@ -241,7 +237,6 @@ namespace HighPerformanceDynamicBone
         private TransformAccessArray colliderTransformAccessArray;
         private TransformAccessArray headTransformAccessArray;
         private TransformAccessArray particleTransformAccessArray;
-        private bool isFirstUpdate;
         private float time;
 
         private void Awake()
@@ -260,7 +255,6 @@ namespace HighPerformanceDynamicBone
 
 
             boneColliderMatchMap = new NativeMultiHashMap<int, int>(200, Allocator.Persistent);
-            isFirstUpdate = true;
         }
 
 
@@ -285,16 +279,9 @@ namespace HighPerformanceDynamicBone
             JobHandle boneSetup = new BoneSetupJob
             {
                 HeadArray = headInfoList,
-                IsFirstUpdate = isFirstUpdate
             }.Schedule(headTransformAccessArray);
 
             JobHandle dependency = JobHandle.CombineDependencies(colliderSetup, boneSetup);
-
-            dependency = new BoneSetupJob
-            {
-                HeadArray = headInfoList,
-                IsFirstUpdate = isFirstUpdate
-            }.Schedule(headTransformAccessArray, dependency);
 
             dependency = new UpdateParticles1Job
             {
@@ -342,7 +329,7 @@ namespace HighPerformanceDynamicBone
 
             headInfoList.Add(target.HeadInfo);
             particleInfoList.AddRange(target.ParticleInfoArray);
-            headTransformAccessArray.Add(target.RootParentTransform);
+            headTransformAccessArray.Add(target.RootBoneParentTransform);
             for (int i = 0; i < DynamicBone.MaxParticleLimit; i++)
             {
                 particleTransformAccessArray.Add(target.ParticleTransformArray[i]);
@@ -397,7 +384,7 @@ namespace HighPerformanceDynamicBone
 
             target.ClearJobData();
 
-            if (isFirstUpdate) isFirstUpdate = false;
+
         }
 
         /// <summary>

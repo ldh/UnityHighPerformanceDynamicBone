@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
 
@@ -34,7 +35,7 @@ namespace HighPerformanceDynamicBone
         public float BoneLength;
         public bool IsCollide;
 
-        public float3 EndOffset;
+        // public float3 EndOffset;
         public float3 InitLocalPosition;
         public quaternion InitLocalRotation;
 
@@ -94,14 +95,6 @@ namespace HighPerformanceDynamicBone
 
         [SerializeField] private AnimationCurve radiusDistribution = null;
 
-        [Tooltip("If End Length is not zero, an extra bone is generated at the end of transform hierarchy.")]
-        [SerializeField]
-        private float endLength = 0;
-
-        [Tooltip("If End Offset is not zero, an extra bone is generated at the end of transform hierarchy.")]
-        [SerializeField]
-        private Vector3 endOffset = Vector3.zero;
-
         [Tooltip("The force apply to bones. Partial force apply to character's initial pose is cancelled out.")]
         [SerializeField]
         private Vector3 gravity = Vector3.zero;
@@ -121,16 +114,19 @@ namespace HighPerformanceDynamicBone
         private int particleCount;
         private bool hasInitialized;
 
+        /// <summary>
+        /// 获取挂载该脚本的骨骼的父物体用于物理模拟，如果父物体为空，则此骨骼无效
+        /// </summary>
+        public Transform RootBoneParentTransform { get; private set; }
 
         /// <summary>
-        /// 需要获取首个Particle的父物体，因为所有的Particle都会拆散至Hierarchy最上级，所以需要一个用以计算的基准Tranform
+        /// 此HeadInfo对应的是RootBoneParentTransform
         /// </summary>
-        public Transform RootParentTransform { get; private set; }
-
         [HideInInspector] public HeadInfo HeadInfo;
 
         private void OnValidate()
         {
+            if(!RootBoneParentTransform) return;
             if (!hasInitialized) return;
 
             damping = Mathf.Clamp01(damping);
@@ -156,10 +152,12 @@ namespace HighPerformanceDynamicBone
             {
                 rootBoneTransform = transform;
             }
-
+            RootBoneParentTransform = rootBoneTransform.parent;
+            if(!RootBoneParentTransform) return;
+            
             ParticleInfoArray = new NativeArray<ParticleInfo>(MaxParticleLimit, Allocator.Persistent);
             ParticleTransformArray = new Transform[MaxParticleLimit];
-            particleCount = 0;
+
             SetupParticles();
             DynamicBoneManager.Instance.AddBone(this);
             hasInitialized = true;
@@ -187,6 +185,7 @@ namespace HighPerformanceDynamicBone
             if (rootBoneTransform == null)
                 return;
 
+            particleCount = 0;
             HeadInfo = new HeadInfo
             {
                 ObjectPrevPosition = rootBoneTransform.position,
@@ -198,13 +197,34 @@ namespace HighPerformanceDynamicBone
             };
 
             particleCount = 0;
-            RootParentTransform = rootBoneTransform.parent;
             boneTotalLength = 0;
             AppendParticles(rootBoneTransform, -1, 0, ref HeadInfo);
-
             UpdateParameters();
+            // TestAppendParticles();
 
             HeadInfo.ParticleCount = particleCount;
+        }
+
+        private void TestAppendParticles()
+        {
+            List<Transform> particleTransformList = new List<Transform>();
+
+            Transform currentTransform = rootBoneTransform;
+
+            do
+            {
+                for (int i = 0; i < currentTransform.childCount; i++)
+                {
+                    particleTransformList.Add(currentTransform.GetChild(i));
+                }
+
+                currentTransform = currentTransform.GetChild(0);
+            } while (currentTransform.childCount > 0);
+
+            for (int i = 0; i < particleTransformList.Count; i++)
+            {
+                Debug.Log(particleTransformList[i].name);
+            }
         }
 
         private void AppendParticles(Transform b, int parentIndex, float boneLength, ref HeadInfo head)
@@ -214,11 +234,11 @@ namespace HighPerformanceDynamicBone
                 Index = particleCount,
                 ParentIndex = parentIndex
             };
+            
 
             if (b != null)
             {
                 particleCount++;
-
                 particle.InitLocalPosition = b.localPosition;
                 particle.InitLocalRotation = b.localRotation;
                 particle.LocalPosition = particle.InitLocalPosition;
@@ -227,50 +247,32 @@ namespace HighPerformanceDynamicBone
                 particle.WorldRotation = b.rotation;
                 particle.ParentScale = b.parent.lossyScale;
             }
-            else // end bone
-            {
-                Transform pb = ParticleTransformArray[parentIndex];
-                if (endLength > 0)
-                {
-                    Transform ppb = pb.parent;
-                    if (ppb != null)
-                        particle.EndOffset = pb.InverseTransformPoint((pb.position * 2 - ppb.position)) * endLength;
-                    else
-                        particle.EndOffset = new Vector3(endLength, 0, 0);
-                }
-                else
-                {
-                    particle.EndOffset =
-                        pb.InverseTransformPoint(rootBoneTransform.TransformDirection(endOffset) + pb.position);
-                }
-
-                particle.TempWorldPosition = particle.TempPrevWorldPosition = pb.TransformPoint(particle.EndOffset);
-            }
-
+                   
+            //两Particle成一根骨，从第二个Particle开始计算骨骼长度
             if (parentIndex >= 0)
             {
                 boneLength += math.distance(ParticleTransformArray[parentIndex].position, particle.TempWorldPosition);
                 particle.BoneLength = boneLength;
                 boneTotalLength = math.max(boneTotalLength, boneLength);
             }
-
+            
+            int index = particle.Index;
             ParticleInfoArray[particle.Index] = particle;
             ParticleTransformArray[particle.Index] = b;
-
-            int index = particle.Index;
-
+            
+            //TODO:目前只支持单链骨骼，即每个骨骼下只有一个子物体，待修改支持树形骨骼
             if (b != null)
             {
                 for (int i = 0; i < b.childCount; ++i)
                 {
                     AppendParticles(b.GetChild(i), index, boneLength, ref head);
                 }
-
-                if (b.childCount == 0 && (endLength > 0 || endOffset != Vector3.zero))
-                    AppendParticles(null, index, boneLength, ref head);
             }
         }
 
+        /// <summary>
+        /// 用于将所有Particle恢复至最初位置
+        /// </summary>
         private void InitTransforms()
         {
             for (int i = 0; i < ParticleInfoArray.Length; ++i)
