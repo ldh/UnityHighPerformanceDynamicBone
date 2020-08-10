@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
@@ -34,8 +35,9 @@ namespace HighPerformanceDynamicBone
         public float Radius;
         public float BoneLength;
         public bool IsCollide;
+        public bool IsEndBone;
 
-        // public float3 EndOffset;
+        public float3 EndOffset;
         public float3 InitLocalPosition;
         public quaternion InitLocalRotation;
 
@@ -53,11 +55,6 @@ namespace HighPerformanceDynamicBone
 
     public class DynamicBone : MonoBehaviour
     {
-        /// <summary>
-        /// 该值为所有动态骨骼链中最长的那一根所包含的节点数量
-        /// </summary>
-        public const int MaxParticleLimit = 22;
-
         [Tooltip("运动的根骨骼")] [SerializeField] private Transform rootBoneTransform = null;
 
         [Tooltip("阻尼：How much the bones slowed down.")] [SerializeField] [Range(0, 1)]
@@ -89,27 +86,35 @@ namespace HighPerformanceDynamicBone
 
         [SerializeField] private AnimationCurve frictionDistribution = null;
 
-        [Tooltip("半径：Each bone can be a sphere to collide with colliders. Radius describe sphere's size.")]
-        [SerializeField]
+        [Tooltip("半径：Each bone can be a sphere to collide with colliders. Radius describe sphere's size.")] [SerializeField]
         private float radius = 0;
 
         [SerializeField] private AnimationCurve radiusDistribution = null;
 
-        [Tooltip("The force apply to bones. Partial force apply to character's initial pose is cancelled out.")]
-        [SerializeField]
+        [Tooltip("The force apply to bones. Partial force apply to character's initial pose is cancelled out.")] [SerializeField]
         private Vector3 gravity = Vector3.zero;
 
         [Tooltip("The force apply to bones.")] [SerializeField]
         private Vector3 force = Vector3.zero;
 
-        [Tooltip("Collider objects interact with the bones.")] [SerializeField]
+        [Tooltip("如果这个值不是0，最后会添加一个新的节点")]
+        [SerializeField] private float endLength = 0;
+        
+        [Tooltip("如果这个值不是zero，最后会添加一个新的节点")]
+        [SerializeField] private Vector3 endOffset = Vector3.zero;
+        
+        [Tooltip("需要和骨骼交互的碰撞器")] [SerializeField]
         private DynamicBoneCollider[] colliderArray = null;
 
+        [Tooltip("从指定的节点开始后面的子节点都不会进行物理模拟")][SerializeField]
+        private Transform[] exclusionTransformArray = null;
+        
         private float boneTotalLength;
+        
         private float weight = 1.0f;
 
-        [HideInInspector] public NativeArray<ParticleInfo> ParticleInfoArray;
-        [HideInInspector] public Transform[] ParticleTransformArray;
+        [NonSerialized] public NativeArray<ParticleInfo> ParticleInfoArray;
+        [NonSerialized] public Transform[] ParticleTransformArray;
 
         private int particleCount;
         private bool hasInitialized;
@@ -155,8 +160,8 @@ namespace HighPerformanceDynamicBone
             RootBoneParentTransform = rootBoneTransform.parent;
             if(!RootBoneParentTransform) return;
             
-            ParticleInfoArray = new NativeArray<ParticleInfo>(MaxParticleLimit, Allocator.Persistent);
-            ParticleTransformArray = new Transform[MaxParticleLimit];
+            ParticleInfoArray = new NativeArray<ParticleInfo>(DynamicBoneManager.MaxParticleLimit, Allocator.Persistent);
+            ParticleTransformArray = new Transform[DynamicBoneManager.MaxParticleLimit];
 
             SetupParticles();
             DynamicBoneManager.Instance.AddBone(this);
@@ -166,7 +171,7 @@ namespace HighPerformanceDynamicBone
         public HeadInfo ResetHeadIndexAndDataOffset(int headIndex)
         {
             HeadInfo.Index = headIndex;
-            HeadInfo.DataOffsetInGlobalArray = headIndex * MaxParticleLimit;
+            HeadInfo.DataOffsetInGlobalArray = headIndex * DynamicBoneManager.MaxParticleLimit;
             return HeadInfo;
         }
 
@@ -227,6 +232,7 @@ namespace HighPerformanceDynamicBone
             }
         }
 
+        //TODO:这个循环需要整理一下，目前过于混乱了
         private void AppendParticles(Transform b, int parentIndex, float boneLength, ref HeadInfo head)
         {
             ParticleInfo particle = new ParticleInfo
@@ -247,6 +253,27 @@ namespace HighPerformanceDynamicBone
                 particle.WorldRotation = b.rotation;
                 particle.ParentScale = b.parent.lossyScale;
             }
+            else
+            {
+                Transform pb = ParticleTransformArray[parentIndex];
+                if (endLength > 0)
+                {
+                    Transform ppb = pb.parent;
+                    if (ppb != null)
+                        particle.EndOffset = pb.InverseTransformPoint((pb.position * 2 - ppb.position)) * endLength;
+                    else
+                        particle.EndOffset = new Vector3(endLength, 0, 0);
+                }
+                else
+                {
+                    particle.EndOffset =
+                        pb.InverseTransformPoint(rootBoneTransform.TransformDirection(endOffset) + pb.position);
+                }
+
+                particle.IsEndBone = true;
+                
+                particle.TempWorldPosition = particle.TempPrevWorldPosition = pb.TransformPoint(particle.EndOffset);
+            }
                    
             //两Particle成一根骨，从第二个Particle开始计算骨骼长度
             if (parentIndex >= 0)
@@ -257,6 +284,7 @@ namespace HighPerformanceDynamicBone
             }
             
             int index = particle.Index;
+            Debug.Log(index);
             ParticleInfoArray[particle.Index] = particle;
             ParticleTransformArray[particle.Index] = b;
             
@@ -265,7 +293,34 @@ namespace HighPerformanceDynamicBone
             {
                 for (int i = 0; i < b.childCount; ++i)
                 {
-                    AppendParticles(b.GetChild(i), index, boneLength, ref head);
+                    bool exclude = false;
+                    if (exclusionTransformArray != null)
+                    {
+                        for (int j = 0; j < exclusionTransformArray.Length; j++)
+                        {
+                            Transform e = exclusionTransformArray[j];
+                            if (e == b.GetChild(i))
+                            {
+                                exclude = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!exclude)
+                    {
+                        AppendParticles(b.GetChild(i), index, boneLength, ref head);
+                    }
+                    //如果到该节点被剔除了，仍需要在最后添加一个空节点
+                    else if ( endLength > 0 || endOffset != Vector3.zero)
+                    {
+                        AppendParticles(null, index, boneLength, ref head);
+                    }
+                }
+
+                if (b.childCount == 0 && (endLength > 0 || endOffset != Vector3.zero))
+                {
+                    AppendParticles(null, index, boneLength, ref head);
                 }
             }
         }

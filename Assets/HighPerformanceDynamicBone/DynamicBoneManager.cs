@@ -23,6 +23,11 @@ namespace HighPerformanceDynamicBone
 
         [SerializeField] private float updateRate = 60;
 
+        /// <summary>
+        /// 该值为所有动态骨骼链中最长的那一根所包含的节点数量
+        /// </summary>
+        public const int MaxParticleLimit = 20;
+
         [BurstCompile]
         private struct ColliderSetupJob : IJobParallelForTransform
         {
@@ -48,7 +53,7 @@ namespace HighPerformanceDynamicBone
                 HeadInfo curHeadInfo = HeadArray[index];
                 curHeadInfo.RootParentBoneWorldPos = transform.position;
                 curHeadInfo.RootParentBoneWorldRot = transform.rotation;
-                
+
                 curHeadInfo.ObjectMove = transform.position - (Vector3) curHeadInfo.ObjectPrevPosition;
 
                 curHeadInfo.ObjectPrevPosition = transform.position;
@@ -72,10 +77,10 @@ namespace HighPerformanceDynamicBone
 
             public void Execute(int index)
             {
-                int headIndex = index / DynamicBone.MaxParticleLimit;
+                int headIndex = index / MaxParticleLimit;
                 HeadInfo curHeadInfo = HeadArray[headIndex];
 
-                int offset = index % DynamicBone.MaxParticleLimit;
+                int offset = index % MaxParticleLimit;
                 //每个Head及其Particle只需要计算一次就够了！
                 if (offset == 0)
                 {
@@ -89,8 +94,10 @@ namespace HighPerformanceDynamicBone
 
                         float3 localPosition = p.LocalPosition * p.ParentScale;
                         quaternion localRotation = p.LocalRotation;
-                        float3 worldPosition = parentPosition + math.mul(parentRotation, localPosition);
-                        quaternion worldRotation = math.mul(parentRotation, localRotation);
+                        float3 worldPosition =
+                            Util.LocalToWorldPosition(parentPosition, parentRotation, localPosition);
+                        quaternion worldRotation =
+                            Util.LocalToWorldRotation(parentRotation, localRotation);
 
                         parentPosition = p.WorldPosition = worldPosition;
                         parentRotation = p.WorldRotation = worldRotation;
@@ -144,13 +151,13 @@ namespace HighPerformanceDynamicBone
             public void Execute(int index)
             {
                 //避免IndexOutOfRangeException:Index {0} is out of restricted IJobParallelFor range [{1}...{2] in ReadWriteBuffer.
-                if (index % DynamicBone.MaxParticleLimit == 0) return;
+                if (index % MaxParticleLimit == 0) return;
 
-                int headIndex = index / DynamicBone.MaxParticleLimit;
+                int headIndex = index / MaxParticleLimit;
                 HeadInfo curHeadInfo = HeadArray[headIndex];
 
                 //遍历到那些空的Particle就不用再计算了
-                int offset = index % DynamicBone.MaxParticleLimit;
+                int offset = index % MaxParticleLimit;
                 if (offset >= curHeadInfo.ParticleCount) return;
 
                 int particleId = curHeadInfo.DataOffsetInGlobalArray + offset;
@@ -185,7 +192,7 @@ namespace HighPerformanceDynamicBone
                 {
                     if (ColliderArray[enumerator.Current].IsGlobal) continue;
                     particleInfo.IsCollide =
-                        DynamicBoneUtility.HandleCollision(ColliderArray[enumerator.Current],
+                        DynamicBoneCollider.HandleCollision(ColliderArray[enumerator.Current],
                             ref particleInfo.TempWorldPosition,
                             in particleInfo.Radius);
                 }
@@ -193,10 +200,9 @@ namespace HighPerformanceDynamicBone
                 //与所有的全局碰撞器进行计算
                 for (int i = 0; i < ColliderArray.Length; i++)
                 {
-
                     if (!ColliderArray[i].IsGlobal) continue;
                     particleInfo.IsCollide =
-                        DynamicBoneUtility.HandleCollision(ColliderArray[i],
+                        DynamicBoneCollider.HandleCollision(ColliderArray[i],
                             ref particleInfo.TempWorldPosition,
                             in particleInfo.Radius);
                 }
@@ -248,7 +254,7 @@ namespace HighPerformanceDynamicBone
             headTransformAccessArray = new TransformAccessArray(200, 64);
 
             particleInfoList = new NativeList<ParticleInfo>(Allocator.Persistent);
-            particleTransformAccessArray = new TransformAccessArray(200 * DynamicBone.MaxParticleLimit, 64);
+            particleTransformAccessArray = new TransformAccessArray(200 * MaxParticleLimit, 64);
 
             colliderInfoList = new NativeList<ColliderInfo>(Allocator.Persistent);
             colliderTransformAccessArray = new TransformAccessArray(200, 64);
@@ -268,8 +274,8 @@ namespace HighPerformanceDynamicBone
             int runningDynamicBoneCount = headInfoList.Length;
             if (runningDynamicBoneCount == 0) return;
 
-            int dataArrayLength = runningDynamicBoneCount * DynamicBone.MaxParticleLimit;
-            
+            int dataArrayLength = runningDynamicBoneCount * MaxParticleLimit;
+
 
             JobHandle colliderSetup = new ColliderSetupJob()
             {
@@ -287,7 +293,7 @@ namespace HighPerformanceDynamicBone
             {
                 HeadArray = headInfoList,
                 ParticleArray = particleInfoList,
-            }.Schedule(dataArrayLength, DynamicBone.MaxParticleLimit, dependency);
+            }.Schedule(dataArrayLength, MaxParticleLimit, dependency);
 
             dependency = new UpdateParticle2Job
             {
@@ -295,7 +301,7 @@ namespace HighPerformanceDynamicBone
                 ParticleArray = particleInfoList,
                 ColliderArray = colliderInfoList,
                 BoneColliderMatchMap = boneColliderMatchMap
-            }.Schedule(dataArrayLength, DynamicBone.MaxParticleLimit, dependency);
+            }.Schedule(dataArrayLength, MaxParticleLimit, dependency);
 
             dependency = new ApplyToTransformJob
             {
@@ -330,7 +336,7 @@ namespace HighPerformanceDynamicBone
             headInfoList.Add(target.HeadInfo);
             particleInfoList.AddRange(target.ParticleInfoArray);
             headTransformAccessArray.Add(target.RootBoneParentTransform);
-            for (int i = 0; i < DynamicBone.MaxParticleLimit; i++)
+            for (int i = 0; i < MaxParticleLimit; i++)
             {
                 particleTransformAccessArray.Add(target.ParticleTransformArray[i]);
             }
@@ -359,9 +365,9 @@ namespace HighPerformanceDynamicBone
             {
                 headInfoList.RemoveAtSwapBack(curHeadIndex);
                 headTransformAccessArray.RemoveAtSwapBack(curHeadIndex);
-                for (int i = DynamicBone.MaxParticleLimit - 1; i >= 0; i--)
+                for (int i = MaxParticleLimit - 1; i >= 0; i--)
                 {
-                    int dataOffset = curHeadIndex * DynamicBone.MaxParticleLimit + i;
+                    int dataOffset = curHeadIndex * MaxParticleLimit + i;
                     particleInfoList.RemoveAtSwapBack(dataOffset);
                     particleTransformAccessArray.RemoveAtSwapBack(dataOffset);
                 }
@@ -374,17 +380,15 @@ namespace HighPerformanceDynamicBone
                 headInfoList.RemoveAtSwapBack(curHeadIndex);
                 headInfoList[curHeadIndex] = lastHeadInfo;
                 headTransformAccessArray.RemoveAtSwapBack(curHeadIndex);
-                for (int i = DynamicBone.MaxParticleLimit - 1; i >= 0; i--)
+                for (int i = MaxParticleLimit - 1; i >= 0; i--)
                 {
-                    int dataOffset = curHeadIndex * DynamicBone.MaxParticleLimit + i;
+                    int dataOffset = curHeadIndex * MaxParticleLimit + i;
                     particleInfoList.RemoveAtSwapBack(dataOffset);
                     particleTransformAccessArray.RemoveAtSwapBack(dataOffset);
                 }
             }
 
             target.ClearJobData();
-
-
         }
 
         /// <summary>
@@ -461,4 +465,3 @@ namespace HighPerformanceDynamicBone
         }
     }
 }
-

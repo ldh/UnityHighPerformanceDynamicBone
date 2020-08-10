@@ -485,34 +485,12 @@ MonoBehaviour:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
-  endLength: 0
-  endOffset: {x: 0, y: 0, z: 0}
   gravity: {x: 0, y: 0, z: 0}
   force: {x: 0, y: 0, z: 0}
+  endLength: 1
+  endOffset: {x: 0, y: 0, z: 0}
   colliderArray: []
-  ParticleTransformArray:
-  - {fileID: 1117767136}
-  - {fileID: 1977712674}
-  - {fileID: 1320983127}
-  - {fileID: 169361142}
-  - {fileID: 1155011305}
-  - {fileID: 2012069455}
-  - {fileID: 146053938}
-  - {fileID: 0}
-  - {fileID: 1180299238}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
+  exclusionTransformArray: []
 --- !u!23 &1117767134
 MeshRenderer:
   m_ObjectHideFlags: 0
