@@ -205,7 +205,6 @@ namespace HighPerformanceDynamicBone
             boneTotalLength = 0;
             AppendParticles(rootBoneTransform, -1, 0, ref HeadInfo);
             UpdateParameters();
-            // TestAppendParticles();
 
             HeadInfo.ParticleCount = particleCount;
         }
@@ -245,15 +244,13 @@ namespace HighPerformanceDynamicBone
             if (b != null)
             {
                 particleCount++;
-                particle.InitLocalPosition = b.localPosition;
-                particle.InitLocalRotation = b.localRotation;
-                particle.LocalPosition = particle.InitLocalPosition;
-                particle.LocalRotation = particle.InitLocalRotation;
+                particle.LocalPosition = particle.InitLocalPosition = b.localPosition;
+                particle.LocalRotation = particle.InitLocalRotation = b.localRotation;
                 particle.TempWorldPosition = particle.TempPrevWorldPosition = particle.WorldPosition = b.position;
                 particle.WorldRotation = b.rotation;
                 particle.ParentScale = b.parent.lossyScale;
             }
-            else
+            else //End Bone
             {
                 Transform pb = ParticleTransformArray[parentIndex];
                 if (endLength > 0)
@@ -347,6 +344,7 @@ namespace HighPerformanceDynamicBone
             for (int i = 0; i < particleCount; ++i)
             {
                 ParticleInfo particle = ParticleInfoArray[i];
+                
                 particle.Damping = damping;
                 particle.Elasticity = elasticity;
                 particle.Stiffness = stiffness;
@@ -354,16 +352,12 @@ namespace HighPerformanceDynamicBone
                 particle.Friction = friction;
                 particle.Radius = radius;
 
-
                 if (boneTotalLength > 0)
                 {
                     float a = particle.BoneLength / boneTotalLength;
 
                     if (dampingDistribution != null && dampingDistribution.keys.Length > 0)
-                    {
                         particle.Damping *= dampingDistribution.Evaluate(a);
-                    }
-
                     if (elasticityDistribution != null && elasticityDistribution.keys.Length > 0)
                         particle.Elasticity *= elasticityDistribution.Evaluate(a);
                     if (stiffnessDistribution != null && stiffnessDistribution.keys.Length > 0)
