@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Jobs;
 using Unity.Mathematics;
@@ -51,8 +52,8 @@ namespace HighPerformanceDynamicBone
             public void Execute(int index, TransformAccess transform)
             {
                 HeadInfo curHeadInfo = HeadArray[index];
-                curHeadInfo.RootParentBoneWorldPos = transform.position;
-                curHeadInfo.RootParentBoneWorldRot = transform.rotation;
+                curHeadInfo.RootParentBoneWorldPosition = transform.position;
+                curHeadInfo.RootParentBoneWorldRotation = transform.rotation;
 
                 curHeadInfo.ObjectMove = transform.position - (Vector3) curHeadInfo.ObjectPrevPosition;
 
@@ -84,13 +85,15 @@ namespace HighPerformanceDynamicBone
                 //每个Head及其Particle只需要计算一次就够了！
                 if (offset == 0)
                 {
-                    float3 parentPosition = curHeadInfo.RootParentBoneWorldPos;
-                    quaternion parentRotation = curHeadInfo.RootParentBoneWorldRot;
+                    float3 parentPosition = curHeadInfo.RootParentBoneWorldPosition;
+                    quaternion parentRotation = curHeadInfo.RootParentBoneWorldRotation;
 
                     for (int j = 0; j < curHeadInfo.ParticleCount; j++)
                     {
                         int pIdx = curHeadInfo.DataOffsetInGlobalArray + j;
                         ParticleInfo p = ParticleArray[pIdx];
+
+
 
                         float3 localPosition = p.LocalPosition * p.ParentScale;
                         quaternion localRotation = p.LocalRotation;
@@ -99,6 +102,8 @@ namespace HighPerformanceDynamicBone
                         quaternion worldRotation =
                             Util.LocalToWorldRotation(parentRotation, localRotation);
 
+                        
+           
                         parentPosition = p.WorldPosition = worldPosition;
                         parentRotation = p.WorldRotation = worldRotation;
 
@@ -165,17 +170,30 @@ namespace HighPerformanceDynamicBone
 
                 int parentParticleIndex = curHeadInfo.DataOffsetInGlobalArray + particleInfo.ParentIndex;
                 ParticleInfo parentParticleInfo = ParticleArray[parentParticleIndex];
+                
                 float3 pos = particleInfo.WorldPosition;
                 float3 parentPos = parentParticleInfo.WorldPosition;
-                float restLen = math.distance(parentPos, pos);
+                
+                
+                //TODO:尾节点的长度计算方法需要用math修改
+                Matrix4x4 m = float4x4.TRS(parentParticleInfo.TempWorldPosition, parentParticleInfo.WorldRotation,
+                    particleInfo.ParentScale);
+
+                float restLen = !particleInfo.IsEndBone
+                    ? math.distance(parentPos, pos)
+                    : m.MultiplyVector(particleInfo.EndOffset).magnitude;
+                
+                
                 float stiffness = math.lerp(1.0f, particleInfo.Stiffness, curHeadInfo.Weight);
                 if (stiffness > 0 || particleInfo.Elasticity > 0)
                 {
                     float4x4 em0 = float4x4.TRS(parentParticleInfo.TempWorldPosition, parentParticleInfo.WorldRotation,
                         particleInfo.ParentScale);
                     float3 restPos = math.mul(em0, new float4(particleInfo.LocalPosition.xyz, 1)).xyz;
+                    
                     float3 d = restPos - particleInfo.TempWorldPosition;
                     particleInfo.TempWorldPosition += d * particleInfo.Elasticity;
+                    
                     if (stiffness > 0)
                     {
                         d = restPos - particleInfo.TempWorldPosition;
@@ -186,27 +204,30 @@ namespace HighPerformanceDynamicBone
                     }
                 }
 
-                //与指定的非全局碰撞器进行计算，会过滤掉挂载的全局碰撞器防止重复计算
-                NativeMultiHashMap<int, int>.Enumerator enumerator = BoneColliderMatchMap.GetValuesForKey(headIndex);
-                while (enumerator.MoveNext())
-                {
-                    if (ColliderArray[enumerator.Current].IsGlobal) continue;
-                    particleInfo.IsCollide =
-                        DynamicBoneCollider.HandleCollision(ColliderArray[enumerator.Current],
-                            ref particleInfo.TempWorldPosition,
-                            in particleInfo.Radius);
-                }
+                // //与指定的非全局碰撞器进行计算，会过滤掉挂载的全局碰撞器防止重复计算
+                // NativeMultiHashMap<int, int>.Enumerator enumerator = BoneColliderMatchMap.GetValuesForKey(headIndex);
+                // while (enumerator.MoveNext())
+                // {
+                //     if (ColliderArray[enumerator.Current].IsGlobal) continue;
+                //     particleInfo.IsCollide =
+                //         DynamicBoneCollider.HandleCollision(ColliderArray[enumerator.Current],
+                //             ref particleInfo.TempWorldPosition,
+                //             in particleInfo.Radius);
+                // }
+                //
+                // //与所有的全局碰撞器进行计算
+                // for (int i = 0; i < ColliderArray.Length; i++)
+                // {
+                //     if (!ColliderArray[i].IsGlobal) continue;
+                //     particleInfo.IsCollide =
+                //         DynamicBoneCollider.HandleCollision(ColliderArray[i],
+                //             ref particleInfo.TempWorldPosition,
+                //             in particleInfo.Radius);
+                // }
 
-                //与所有的全局碰撞器进行计算
-                for (int i = 0; i < ColliderArray.Length; i++)
-                {
-                    if (!ColliderArray[i].IsGlobal) continue;
-                    particleInfo.IsCollide =
-                        DynamicBoneCollider.HandleCollision(ColliderArray[i],
-                            ref particleInfo.TempWorldPosition,
-                            in particleInfo.Radius);
-                }
-
+                
+                // particleInfo.WorldPosition = particleInfo.TempWorldPosition;
+                
                 float3 dd = parentParticleInfo.TempWorldPosition - particleInfo.TempWorldPosition;
                 float leng = math.length(dd);
                 if (leng > 0)
@@ -214,19 +235,38 @@ namespace HighPerformanceDynamicBone
                     particleInfo.TempWorldPosition += dd * ((leng - restLen) / leng);
                 }
 
-//            particleInfo.WorldPosition = particleInfo.TempWorldPosition;
+
                 ParticleArray[particleId] = particleInfo;
             }
         }
 
+        // [BurstCompile]
+        // private struct ApplyToTransformJob : IJobParallelForTransform
+        // {
+        //     public NativeArray<ParticleInfo> ParticleArray;
+        //
+        //     public void Execute(int index, TransformAccess transform)
+        //     {
+        //         ParticleInfo particleInfo = ParticleArray[index];
+        //         particleInfo.WorldPosition = particleInfo.TempWorldPosition;
+        //         transform.position = particleInfo.WorldPosition;
+        //         transform.rotation = particleInfo.WorldRotation;
+        //         ParticleArray[index] = particleInfo;
+        //     }
+        // }
+        
         [BurstCompile]
         private struct ApplyToTransformJob : IJobParallelForTransform
         {
             public NativeArray<ParticleInfo> ParticleArray;
-
+        
             public void Execute(int index, TransformAccess transform)
             {
                 ParticleInfo particleInfo = ParticleArray[index];
+                // ParticleInfo pp = ParticleArray[particleInfo.ParentIndexInGlobalArray];
+                
+                
+                
                 particleInfo.WorldPosition = particleInfo.TempWorldPosition;
                 transform.position = particleInfo.WorldPosition;
                 transform.rotation = particleInfo.WorldRotation;
@@ -340,6 +380,13 @@ namespace HighPerformanceDynamicBone
             {
                 particleTransformAccessArray.Add(target.ParticleTransformArray[i]);
             }
+
+            ////树状结构测试
+            // Debug.Log(target.ParticleInfoArray.Length);
+            // for (int i = 0; i < target.ParticleInfoArray.Length; i++)
+            // {
+            //     Debug.Log(target.ParticleInfoArray[i].ParentIndex);
+            // }
         }
 
 
@@ -387,7 +434,6 @@ namespace HighPerformanceDynamicBone
                     particleTransformAccessArray.RemoveAtSwapBack(dataOffset);
                 }
             }
-
             target.ClearJobData();
         }
 
@@ -462,6 +508,22 @@ namespace HighPerformanceDynamicBone
             if (colliderInfoList.IsCreated) colliderInfoList.Dispose();
             if (colliderTransformAccessArray.isCreated) colliderTransformAccessArray.Dispose();
             if (boneColliderMatchMap.IsCreated) boneColliderMatchMap.Dispose();
+        }
+
+        private void OnDrawGizmos()
+        {
+            Gizmos.color = Color.white;
+            for (int i = 0; i < particleInfoList.Length; ++i)
+            {
+                ParticleInfo p = particleInfoList[i];
+                if (p.NotNull && p.ParentIndex >= 0)
+                {
+                    ParticleInfo p0 = particleInfoList[p.ParentIndex];
+                    Gizmos.DrawLine(p.WorldPosition, p0.WorldPosition);
+                }
+                if (p.Radius > 0)
+                    Gizmos.DrawWireSphere(p.WorldPosition, p.Radius * 1);
+            }
         }
     }
 }

@@ -6,6 +6,17 @@ using Unity.Collections;
 
 namespace HighPerformanceDynamicBone
 {
+    
+    //        o    <-根骨骼父物体，由此读取运动信息并让骨骼进行模拟，HeadInfo中的位置旋转等信息都是这个物体的，同时也存储一些骨骼结构通用的信息
+    //        |
+    //        o    <-挂载DynamicBone脚本的物体，也是骨骼树形结构的根骨骼， 同时也是最上级的ParticleInfo
+    //       /\
+    //      o  o     <-子Particle
+    //     /\  /\
+    //    o  oo  o     <-子Particle
+    
+    
+    
     public struct HeadInfo
     {
         public int Index;
@@ -19,9 +30,10 @@ namespace HighPerformanceDynamicBone
         public int ParticleCount;
         public int DataOffsetInGlobalArray;
 
-        public float3 RootParentBoneWorldPos;
-        public quaternion RootParentBoneWorldRot;
+        public float3 RootParentBoneWorldPosition;
+        public quaternion RootParentBoneWorldRotation;
     }
+
 
     public struct ParticleInfo
     {
@@ -36,6 +48,9 @@ namespace HighPerformanceDynamicBone
         public float BoneLength;
         public bool IsCollide;
         public bool IsEndBone;
+        public bool NotNull;
+
+        public int ChildCount;
 
         public float3 EndOffset;
         public float3 InitLocalPosition;
@@ -203,47 +218,27 @@ namespace HighPerformanceDynamicBone
 
             particleCount = 0;
             boneTotalLength = 0;
-            AppendParticles(rootBoneTransform, -1, 0, ref HeadInfo);
+            AppendParticles(rootBoneTransform, -1, 0, in HeadInfo);
             UpdateParameters();
 
             HeadInfo.ParticleCount = particleCount;
         }
 
-        private void TestAppendParticles()
-        {
-            List<Transform> particleTransformList = new List<Transform>();
-
-            Transform currentTransform = rootBoneTransform;
-
-            do
-            {
-                for (int i = 0; i < currentTransform.childCount; i++)
-                {
-                    particleTransformList.Add(currentTransform.GetChild(i));
-                }
-
-                currentTransform = currentTransform.GetChild(0);
-            } while (currentTransform.childCount > 0);
-
-            for (int i = 0; i < particleTransformList.Count; i++)
-            {
-                Debug.Log(particleTransformList[i].name);
-            }
-        }
-
         //TODO:这个循环需要整理一下，目前过于混乱了
-        private void AppendParticles(Transform b, int parentIndex, float boneLength, ref HeadInfo head)
+        private void AppendParticles(Transform b, int parentIndex, float boneLength, in HeadInfo head)
         {
             ParticleInfo particle = new ParticleInfo
             {
                 Index = particleCount,
-                ParentIndex = parentIndex
+                ParentIndex = parentIndex,
+                NotNull = true
             };
             
-
+            particleCount++;
+            
+            
             if (b != null)
             {
-                particleCount++;
                 particle.LocalPosition = particle.InitLocalPosition = b.localPosition;
                 particle.LocalRotation = particle.InitLocalRotation = b.localRotation;
                 particle.TempWorldPosition = particle.TempPrevWorldPosition = particle.WorldPosition = b.position;
@@ -267,9 +262,8 @@ namespace HighPerformanceDynamicBone
                         pb.InverseTransformPoint(rootBoneTransform.TransformDirection(endOffset) + pb.position);
                 }
 
-                particle.IsEndBone = true;
-                
                 particle.TempWorldPosition = particle.TempPrevWorldPosition = pb.TransformPoint(particle.EndOffset);
+                particle.IsEndBone = true;
             }
                    
             //两Particle成一根骨，从第二个Particle开始计算骨骼长度
@@ -281,13 +275,12 @@ namespace HighPerformanceDynamicBone
             }
             
             int index = particle.Index;
-            Debug.Log(index);
             ParticleInfoArray[particle.Index] = particle;
             ParticleTransformArray[particle.Index] = b;
             
-            //TODO:目前只支持单链骨骼，即每个骨骼下只有一个子物体，待修改支持树形骨骼
             if (b != null)
             {
+                particle.ChildCount = b.childCount;
                 for (int i = 0; i < b.childCount; ++i)
                 {
                     bool exclude = false;
@@ -306,18 +299,18 @@ namespace HighPerformanceDynamicBone
 
                     if (!exclude)
                     {
-                        AppendParticles(b.GetChild(i), index, boneLength, ref head);
+                        AppendParticles(b.GetChild(i), index, boneLength, in head);
                     }
                     //如果到该节点被剔除了，仍需要在最后添加一个空节点
                     else if ( endLength > 0 || endOffset != Vector3.zero)
                     {
-                        AppendParticles(null, index, boneLength, ref head);
+                        AppendParticles(null, index, boneLength, in head);
                     }
                 }
 
                 if (b.childCount == 0 && (endLength > 0 || endOffset != Vector3.zero))
                 {
-                    AppendParticles(null, index, boneLength, ref head);
+                    AppendParticles(null, index, boneLength, in head);
                 }
             }
         }

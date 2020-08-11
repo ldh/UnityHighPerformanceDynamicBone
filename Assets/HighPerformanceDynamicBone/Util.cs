@@ -14,6 +14,16 @@ namespace HighPerformanceDynamicBone
         {
             return math.mul(parentRotation, targetLocalRotation);
         }
+        
+        public static float3 WorldToLocalPosition(float3 parentPosition,quaternion  parentRotation, float3 targetWorldPosition)
+        {
+            return float3.zero;
+        }
+
+        public static quaternion WorldToLocalRotation(quaternion  parentRotation, quaternion targetWorldRotation)
+        {
+            return quaternion.identity;
+        }
     }
 }
 
