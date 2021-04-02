@@ -1,5 +1,5 @@
 # UnityHighPerformanceDynamicBone
-目前使用的Unity和Package版本：Unity-2019.4， Jobs-0.2.10， Burst-1.3.3
+目前使用的Unity和Package版本：Unity-2020.3.1f1， Jobs-0.8.0， Burst-1.4.1
 
 参照DynamicBone插件的思路，使用**JobSystem**和**BurstCompiler**对其进行了优化，在使用方法上与该插件非常相似，但是拥有超高的性能，快就完事了！
 
